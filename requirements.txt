@@ -1,0 +1,8 @@
+torch
+diffusers
+transformers
+accelerate
+safetensors
+flask
+pillow
+numpy

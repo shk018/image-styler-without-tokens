@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Outfit Studio</title>
+<style>
+:root{--bg:#faf7f2;--fg:#1d1b19;--card:#fff;--mut:#7a746c;--ac:#b4452f;--bd:#e4ddd2}
+@media(prefers-color-scheme:dark){:root{--bg:#161412;--fg:#f3eee7;--card:#221f1c;--mut:#a39b90;--ac:#e2765f;--bd:#38332e}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:Georgia,serif;line-height:1.5}
+main{max-width:980px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:2rem;margin:0 0 4px}
+.sub{color:var(--mut);margin:0 0 24px;font-family:system-ui,sans-serif;font-size:.95rem}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px}
+.card h2{font-size:.85rem;margin:0 0 10px;font-family:system-ui,sans-serif;text-transform:uppercase;letter-spacing:.08em;color:var(--mut)}
+label,button,textarea,.hint{font-family:system-ui,sans-serif}
+#drop{border:2px dashed var(--bd);border-radius:12px;padding:44px 16px;text-align:center;cursor:pointer;color:var(--mut)}
+#drop:hover,#drop.over{border-color:var(--ac);color:var(--ac)}
+.stage{position:relative;width:100%;line-height:0}
+.stage canvas{width:100%;height:auto;border-radius:10px;display:block}
+#ov{position:absolute;inset:0;opacity:.5;touch-action:none;cursor:crosshair}
+textarea{width:100%;min-height:96px;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--fg);font-size:.95rem;resize:vertical}
+.row{display:flex;gap:10px;align-items:center;margin:10px 0;flex-wrap:wrap}
+button{border:1px solid var(--bd);background:var(--bg);color:var(--fg);padding:9px 14px;border-radius:10px;cursor:pointer;font-size:.9rem}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac);font-weight:600;width:100%;padding:12px}
+button:disabled{opacity:.5;cursor:wait}
+.hint{color:var(--mut);font-size:.82rem;margin:6px 0}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chips button{font-size:.8rem;padding:5px 10px;border-radius:99px}
+#msg{color:var(--ac);font-family:system-ui,sans-serif;font-size:.9rem;min-height:1.3em;margin-top:8px}
+#out img{width:100%;border-radius:10px;display:block}
+.empty{color:var(--mut);text-align:center;padding:60px 10px;font-family:system-ui,sans-serif;font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+  <h1>Outfit Studio</h1>
+  <p class="sub">Upload a photo, describe the clothing you want, and the AI on your computer restyles it.</p>
+  <div class="grid">
+    <section class="card">
+      <h2>1 · Your photo</h2>
+      <div id="drop">Click or drop an image here<input id="file" type="file" accept="image/*" hidden></div>
+      <div id="tools" hidden>
+        <div class="stage"><canvas id="base"></canvas><canvas id="ov"></canvas></div>
+        <div class="row">
+          <button id="auto">Auto-select clothes</button>
+          <button id="clear">Clear</button>
+          <button id="change">New photo</button>
+        </div>
+        <div class="row"><label>Brush <input id="size" type="range" min="8" max="90" value="36"></label></div>
+        <p class="hint">Red = the area that will be changed. Click Auto-select, then fix it by painting more. Painting is required if auto-select misses something.</p>
+      </div>
+    </section>
+    <section class="card">
+      <h2>2 · Describe the clothing</h2>
+      <textarea id="prompt" placeholder="e.g. a navy blue blazer over a white shirt"></textarea>
+      <div class="chips" id="chips"></div>
+      <div style="margin-top:14px"><button class="p" id="go">Generate new outfit</button></div>
+      <div id="msg"></div>
+    </section>
+  </div>
+  <section class="card" style="margin-top:18px">
+    <h2>3 · Result</h2>
+    <div id="out"><div class="empty">Your restyled image will appear here.</div></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const base = $('base'), ov = $('ov'), bctx = base.getContext('2d'), octx = ov.getContext('2d');
+let hasImg = false, drawing = false, last = null;
+const msg = t => $('msg').textContent = t;
+const toBlob = c => new Promise(r => c.toBlob(r, 'image/png'));
+
+['a red silk saree','black leather jacket','white linen summer shirt','formal grey suit','floral summer dress','hoodie and cargo pants']
+  .forEach(t => { const b = document.createElement('button'); b.textContent = t; b.onclick = () => $('prompt').value = t; $('chips').appendChild(b); });
+
+function load(src){
+  const im = new Image();
+  im.onload = () => {
+    const s = Math.min(1, 1024 / Math.max(im.width, im.height));
+    const w = Math.round(im.width * s), h = Math.round(im.height * s);
+    base.width = ov.width = w; base.height = ov.height = h;
+    bctx.drawImage(im, 0, 0, w, h); octx.clearRect(0, 0, w, h);
+    hasImg = true; $('drop').hidden = true; $('tools').hidden = false;
+  };
+  im.src = src;
+}
+const pick = f => { if(f && f.type.startsWith('image/')) load(URL.createObjectURL(f)); };
+$('drop').onclick = $('change').onclick = () => $('file').click();
+$('file').onchange = e => pick(e.target.files[0]);
+$('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+$('drop').ondragleave = () => $('drop').classList.remove('over');
+$('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('over'); pick(e.dataTransfer.files[0]); };
+
+function pos(e){ const r = ov.getBoundingClientRect(); return { x:(e.clientX-r.left)*ov.width/r.width, y:(e.clientY-r.top)*ov.height/r.height }; }
+function stroke(a, b){
+  octx.strokeStyle = '#e03c3c'; octx.lineCap = octx.lineJoin = 'round';
+  octx.lineWidth = +$('size').value * ov.width / ov.getBoundingClientRect().width;
+  octx.beginPath(); octx.moveTo(a.x, a.y); octx.lineTo(b.x, b.y); octx.stroke();
+}
+ov.onpointerdown = e => { drawing = true; ov.setPointerCapture(e.pointerId); last = pos(e); stroke(last, last); };
+ov.onpointermove = e => { if(!drawing) return; const p = pos(e); stroke(last, p); last = p; };
+ov.onpointerup = ov.onpointercancel = () => drawing = false;
+$('clear').onclick = () => octx.clearRect(0, 0, ov.width, ov.height);
+
+async function post(url, fd){
+  const res = await fetch(url, { method: 'POST', body: fd });
+  if(!res.ok) throw new Error('Server error (' + res.status + '). Check the terminal running app.py.');
+  return res.blob();
+}
+
+$('auto').onclick = async () => {
+  if(!hasImg) return;
+  msg('Detecting clothes…'); $('auto').disabled = true;
+  try {
+    const fd = new FormData(); fd.append('image', await toBlob(base), 'photo.png');
+    const bmp = await createImageBitmap(await post('/segment', fd));
+    const t = document.createElement('canvas'); t.width = ov.width; t.height = ov.height;
+    const tc = t.getContext('2d'); tc.drawImage(bmp, 0, 0, t.width, t.height);
+    const d = tc.getImageData(0, 0, t.width, t.height), p = d.data;
+    for(let i = 0; i < p.length; i += 4){
+      const on = p[i] > 127; p[i] = 224; p[i+1] = 60; p[i+2] = 60; p[i+3] = on ? 255 : 0;
+    }
+    octx.putImageData(d, 0, 0); msg('');
+  } catch(err){ msg(err.message.includes('fetch') ? 'Cannot reach the server. Is app.py running?' : err.message); }
+  $('auto').disabled = false;
+};
+
+async function buildMask(){
+  const d = octx.getImageData(0, 0, ov.width, ov.height), p = d.data; let any = false;
+  for(let i = 0; i < p.length; i += 4){
+    const on = p[i+3] > 0; if(on) any = true;
+    p[i] = p[i+1] = p[i+2] = on ? 255 : 0; p[i+3] = 255;
+  }
+  if(!any) return null;
+  const c = document.createElement('canvas'); c.width = ov.width; c.height = ov.height;
+  c.getContext('2d').putImageData(d, 0, 0); return toBlob(c);
+}
+
+$('go').onclick = async () => {
+  const want = $('prompt').value.trim();
+  if(!hasImg) return msg('Upload a photo first.');
+  if(!want) return msg('Describe the clothing you want.');
+  const mask = await buildMask();
+  if(!mask) return msg('Select the clothing first: click Auto-select or paint over it.');
+  msg(''); $('go').disabled = true; $('go').textContent = 'Generating… (this can take a while)';
+  try {
+    const fd = new FormData();
+    fd.append('image', await toBlob(base), 'photo.png'); fd.append('mask', mask, 'mask.png'); fd.append('prompt', want);
+    const url = URL.createObjectURL(await post('/generate', fd));
+    $('out').innerHTML = '<img src="' + url + '" alt="Restyled photo"><div class="row"><a download="outfit.png" href="' + url + '"><button>Download</button></a><button id="reuse">Use as new starting photo</button></div>';
+    $('reuse').onclick = () => { load(url); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  } catch(err){ msg(err.message); }
+  $('go').disabled = false; $('go').textContent = 'Generate new outfit';
+};
+</script>
+</body>
+</html>
